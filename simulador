@@ -144,7 +144,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;font-family:var
 
 <div class="wrap">
   <header>
-    <h1>Robot exprimidor de cítricos</h1>
+    <h1>CitriBot: Robot exprimidor de cítricos</h1>
     <p class="sub">Simulador del ciclo completo: la cámara identifica cada fruta, el selector descarta la que no corresponde, y luego se corta, se exprime, se descarta la cáscara y se mide el jugo por peso.</p>
   </header>
 
