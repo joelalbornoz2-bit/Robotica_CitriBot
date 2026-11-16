@@ -1,1 +1,839 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Robot exprimidor de cítricos</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Diseño: columna de máquina (esquema animado, pantalla LCD, etapas) + columna de mando; tabla de lecturas abajo. */
+:root{
+  --font-ui:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  --bg:#eceff0; --surface:#fbfcfc; --panel:#e1e6e8; --fg:#182126; --muted:#56676f; --line:#c4ced3;
+  --accent:#0e6c78; --accent-fg:#ffffff; --steel:#b4bfc4; --steel-d:#7e8f98;
+  --ok:#23805a; --warn:#b97a00; --err:#c43a31; --info:#2a68c8;
+  --lcd-bg:#16241f; --lcd-fg:#a6f0c2; --lcd-dim:#6aa684;
+  --jugo:#f7a339;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12181b; --surface:#1a2227; --panel:#232d33; --fg:#e4eaec; --muted:#97a7af; --line:#33424a;
+    --accent:#4fc0cf; --accent-fg:#06222a; --steel:#4b5b63; --steel-d:#8fa0a8;
+    --ok:#4cc38a; --warn:#e8ac2e; --err:#f2776d; --info:#6aa0f0;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12181b; --surface:#1a2227; --panel:#232d33; --fg:#e4eaec; --muted:#97a7af; --line:#33424a;
+  --accent:#4fc0cf; --accent-fg:#06222a; --steel:#4b5b63; --steel-d:#8fa0a8;
+  --ok:#4cc38a; --warn:#e8ac2e; --err:#f2776d; --info:#6aa0f0;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--fg); font-family:var(--font-ui); font-size:15px; line-height:1.45; margin:0;
+  padding-block:20px 36px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+.wrap{max-width:1180px;margin:0 auto;display:grid;gap:16px}
+h1{font-size:26px;line-height:1.15;margin:0 0 4px;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 12px;font-weight:600}
+.sub{margin:0;color:var(--muted);max-width:70ch}
+.grid{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;align-items:start}
+@media (min-width:960px){.grid{grid-template-columns:minmax(0,1fr) 340px}}
+.col-main,.col-side{display:grid;gap:12px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}
+.note{margin:0;font-size:13px;color:var(--muted);max-width:80ch}
 
+/* Esquema */
+.scene{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+.scene svg{display:block;width:100%;min-width:620px;height:auto}
+.body{fill:var(--panel);stroke:var(--steel-d);stroke-width:2}
+.steel{fill:var(--steel);stroke:var(--steel-d);stroke-width:1.5}
+.steel-d{fill:var(--steel-d)}
+.line-steel{stroke:var(--steel-d);stroke-width:3;fill:none;stroke-linejoin:round}
+.chute{stroke:var(--steel-d);stroke-width:2;stroke-dasharray:4 5;opacity:.7}
+.st{font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;fill:var(--muted);text-anchor:middle}
+.st.active{fill:var(--accent);font-weight:500}
+.sv{font-family:var(--font-mono);font-size:11px;fill:var(--fg);text-anchor:middle}
+.tick{font-family:var(--font-mono);font-size:10px;fill:var(--muted);text-anchor:end}
+.beltline{stroke:var(--steel-d);stroke-width:2;stroke-dasharray:6 10;animation:belt .6s linear infinite;animation-play-state:paused}
+svg.running .beltline{animation-play-state:running}
+@keyframes belt{to{stroke-dashoffset:-16}}
+.drip circle{fill:var(--jugo);opacity:0;animation-play-state:paused}
+.drip.on circle{animation:drip .7s linear infinite}
+.drip.on circle:nth-child(2){animation-delay:.23s}
+.drip.on circle:nth-child(3){animation-delay:.46s}
+svg.running .drip.on circle{animation-play-state:running}
+@keyframes drip{0%{transform:translateY(0);opacity:1}100%{transform:translateY(58px);opacity:1}}
+.dome{stroke-width:3;stroke-linejoin:round}
+.dseg{stroke:#ffffff;stroke-width:1.5;opacity:.55;fill:none}
+
+/* Pantalla LCD */
+.lcd{background:var(--lcd-bg);color:var(--lcd-fg);font-family:var(--font-mono);border-radius:12px;padding:14px 16px;border:2px solid var(--steel-d);display:grid;gap:8px}
+.lcd-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.lcd-state{font-size:13px;letter-spacing:.1em;text-transform:uppercase;font-weight:500}
+.lcd-msg{font-size:17px;min-height:1.4em;overflow-wrap:anywhere}
+.lcd-det{font-size:12.5px;color:var(--lcd-dim);min-height:1.3em;overflow-wrap:anywhere}
+.lcd-vol{display:flex;justify-content:space-between;font-size:13px;gap:12px;flex-wrap:wrap}
+.bar{position:relative;height:12px;background:#0c1613;border-radius:6px;overflow:hidden;border:1px solid #2c4a3d}
+.bar>i{display:block;height:100%;background:var(--lcd-fg);width:0}
+.bar>b{position:absolute;top:0;bottom:0;width:2px;background:#e8fff0;opacity:.75;left:95%}
+.leds{display:flex;gap:8px;align-items:center}
+.led{width:12px;height:12px;border-radius:50%;background:#2a3b34;border:1px solid #3d5a4d}
+.led.on.blue{background:#5b9cff;box-shadow:0 0 8px #5b9cff}
+.led.on.amber{background:#ffc247;box-shadow:0 0 8px #ffc247}
+.led.on.green{background:#4ce38d;box-shadow:0 0 8px #4ce38d}
+.led.on.red{background:#ff6a5e;box-shadow:0 0 8px #ff6a5e}
+.led.on.blink{animation:blink .8s ease-in-out infinite}
+@keyframes blink{50%{opacity:.25}}
+.buzz{font-size:10px;letter-spacing:.1em;color:var(--lcd-dim);border:1px solid #3d5a4d;border-radius:4px;padding:1px 6px}
+.buzz.on{color:#0c1613;background:var(--lcd-fg)}
+
+/* Etapas */
+.stages{display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0;margin:0}
+.stages li{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.04em;padding:5px 8px;border:1px solid var(--line);border-radius:6px;color:var(--muted);background:var(--surface)}
+.stages li.on{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.stages li.err{background:var(--err);color:#fff;border-color:var(--err)}
+
+/* Mando */
+.btnrow{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:8px}
+.btn{min-height:44px;padding:0 14px;border-radius:8px;border:1.5px solid var(--line);background:var(--surface);color:var(--fg);font:inherit;font-weight:600;cursor:pointer}
+.btn:hover:not(:disabled){border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.field{display:grid;gap:6px;margin-bottom:14px}
+.field:last-child{margin-bottom:0}
+.field>label,.field>legend,.lbl{font-weight:500;font-size:14px;display:flex;justify-content:space-between;gap:8px;padding:0}
+fieldset{border:0;margin:0;padding:0;min-width:0}
+output{font-family:var(--font-mono);font-weight:500;color:var(--accent)}
+.seg-group{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.seg{position:relative;display:block}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{display:flex;align-items:center;justify-content:center;gap:7px;min-height:44px;border:1.5px solid var(--line);border-radius:8px;background:var(--surface);cursor:pointer;font-weight:500;padding:0 6px}
+.seg input:checked+span{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
+.seg input:focus-visible+span{outline:3px solid var(--accent);outline-offset:2px}
+.seg input:disabled+span{opacity:.55;cursor:not-allowed}
+.dot{width:12px;height:12px;border-radius:50%;flex:none;border:1px solid rgba(0,0,0,.25)}
+input[type=range]{width:100%;accent-color:var(--accent);min-height:28px}
+select,input[type=number]{font:inherit;min-height:40px;border:1.5px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);padding:0 8px;width:100%}
+.nums{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.nums label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
+.switch{display:flex;align-items:center;gap:10px;min-height:40px;font-weight:500}
+.switch input{width:20px;height:20px;accent-color:var(--accent)}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin:0}
+.stats div{display:grid;gap:2px}
+.stats dt{font-size:12px;color:var(--muted)}
+.stats dd{margin:0;font-family:var(--font-mono);font-size:17px;font-weight:500}
+
+/* Registro */
+.tablewrap{overflow-x:auto;max-height:340px;overflow-y:auto;border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:14px}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{position:sticky;top:0;background:var(--panel);font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);z-index:1}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.badge.ok{background:color-mix(in srgb,var(--ok) 20%,var(--surface));color:var(--ok)}
+.badge.no{background:color-mix(in srgb,var(--err) 18%,var(--surface));color:var(--err)}
+.empty{padding:18px 12px;color:var(--muted);font-size:14px}
+.summary{margin:10px 0 0;font-size:14px;color:var(--muted);min-height:1.4em}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>CitriBot: Robot exprimidor de cítricos</h1>
+    <p class="sub">Simulador del ciclo completo: la cámara identifica cada fruta, el selector descarta la que no corresponde, y luego se corta, se exprime, se descarta la cáscara y se mide el jugo por peso.</p>
+  </header>
+
+  <main class="grid">
+    <div class="col-main">
+      <div class="scene">
+        <svg id="svg" viewBox="0 0 760 430" role="img" aria-label="Esquema animado del robot exprimidor: tolva, cámara, selector con trampilla de rechazo, cuchilla, exprimidor, jarra con escala en litros y tacho de residuos">
+          <defs><clipPath id="jugClip"><rect x="524" y="300" width="72" height="102" rx="4"/></clipPath></defs>
+
+          <!-- rótulos de estación -->
+          <text class="st" id="lbl-tolva" x="80" y="22">TOLVA</text>
+          <text class="st" id="lbl-vision" x="190" y="22">VISIÓN</text>
+          <text class="st" id="lbl-selector" x="300" y="22">SELECTOR</text>
+          <text class="st" id="lbl-corte" x="420" y="22">CORTE</text>
+          <text class="st" id="lbl-exprimidor" x="560" y="22">EXPRIMIDOR</text>
+          <text class="st" id="lbl-descarte" x="686" y="22">DESCARTE</text>
+
+          <!-- cinta transportadora (con huecos en la trampilla y en el exprimidor) -->
+          <g class="steel">
+            <rect x="30" y="172" width="255" height="10" rx="4"/>
+            <rect x="315" y="172" width="220" height="10" rx="4"/>
+            <rect x="585" y="172" width="79" height="10" rx="4"/>
+          </g>
+          <g class="beltline-g">
+            <line class="beltline" x1="36" y1="177" x2="282" y2="177"/>
+            <line class="beltline" x1="318" y1="177" x2="532" y2="177"/>
+            <line class="beltline" x1="588" y1="177" x2="660" y2="177"/>
+          </g>
+
+          <!-- tolva -->
+          <polygon class="body" points="36,36 124,36 104,118 56,118"/>
+          <g id="hopperDots"></g>
+          <text class="sv" id="hopperCount" x="80" y="54">0 frutas</text>
+          <rect id="gate" class="steel-d" x="56" y="118" width="48" height="5"/>
+
+          <!-- cámara -->
+          <path class="line-steel" d="M165 172V70H215V172"/>
+          <rect class="body" x="176" y="70" width="28" height="30" rx="4"/>
+          <circle class="steel-d" cx="190" cy="104" r="6"/>
+          <polygon id="beam" points="190,108 166,172 214,172" fill="var(--info)" opacity="0"/>
+          <line id="scan" x1="166" x2="214" y1="150" y2="150" stroke="var(--info)" stroke-width="2.5" opacity="0"/>
+
+          <!-- selector: trampilla y tubo de rechazo -->
+          <line class="chute" x1="285" y1="182" x2="285" y2="336"/>
+          <line class="chute" x1="315" y1="182" x2="315" y2="336"/>
+          <rect class="body" x="266" y="336" width="68" height="70" rx="4"/>
+          <text class="sv" id="rejCount" x="300" y="376">0</text>
+          <text class="st" x="300" y="422">RECHAZO</text>
+          <rect id="trap" class="steel-d" x="285" y="172" width="30" height="10"/>
+
+          <!-- corte -->
+          <path class="line-steel" d="M395 172V44H445V172"/>
+
+          <!-- exprimidor -->
+          <path class="line-steel" d="M525 172V44H595V172"/>
+          <rect class="steel-d" x="535" y="172" width="50" height="22"/>
+          <polygon class="steel" points="546,172 560,150 574,172"/>
+          <polygon class="body" points="540,196 580,196 566,226 554,226"/>
+          <rect class="steel-d" x="558" y="226" width="4" height="70"/>
+          <g id="drip" class="drip"><circle cx="560" cy="234" r="3"/><circle cx="560" cy="234" r="3"/><circle cx="560" cy="234" r="3"/></g>
+
+          <!-- jarra con escala -->
+          <rect x="520" y="296" width="80" height="110" rx="8" fill="var(--surface)" stroke="var(--steel-d)" stroke-width="2.5"/>
+          <g clip-path="url(#jugClip)"><rect id="liquid" x="524" y="402" width="72" height="0" fill="var(--jugo)" opacity=".92"/></g>
+          <g id="ticks"></g>
+          <line id="goalLine" x1="518" x2="602" y1="402" y2="402" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 3"/>
+          <text id="goalTxt" x="607" y="406" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--accent)">0,50 L</text>
+          <text class="st" x="560" y="422">JARRA</text>
+
+          <!-- fin de cinta, bandeja basculante y tacho de residuos -->
+          <rect id="tray" class="steel-d" x="664" y="172" width="40" height="6"/>
+          <rect class="body" x="640" y="332" width="90" height="74" rx="4"/>
+          <rect id="binFill" x="644" y="402" width="82" height="0" fill="var(--warn)" opacity=".5"/>
+          <text class="sv" id="binTxt" x="685" y="372">0/20</text>
+          <text class="st" x="685" y="422">TACHO</text>
+
+          <!-- fruta -->
+          <g id="fWhole" style="display:none"><circle id="fwC" r="12" cy="-12" stroke="rgba(0,0,0,.28)" stroke-width="1.5"/><ellipse id="fwH" fill="#fff" opacity=".28" rx="4" ry="2.5"/></g>
+          <g id="half1" style="display:none"><path class="dome"/><path class="dseg"/></g>
+          <g id="half2" style="display:none"><path class="dome"/><path class="dseg"/></g>
+
+          <!-- cuchilla y pisón (por delante de la fruta) -->
+          <g id="knife" transform="translate(420 100)">
+            <rect x="-2.5" y="-96" width="5" height="96" fill="#dfe6e9" stroke="var(--steel-d)" stroke-width="1.2"/>
+            <rect x="-9" y="-100" width="18" height="10" class="steel-d" rx="2"/>
+          </g>
+          <g id="press" transform="translate(560 96)">
+            <rect x="-4" y="-130" width="8" height="118" class="steel-d"/>
+            <rect x="-26" y="-12" width="52" height="12" rx="2" class="steel"/>
+          </g>
+        </svg>
+      </div>
+
+      <section class="lcd" role="status" aria-label="Pantalla del robot">
+        <div class="lcd-top">
+          <span class="lcd-state" id="lcdState">REPOSO</span>
+          <span class="leds" aria-hidden="true">
+            <i class="led blue" id="ledBlue"></i><i class="led amber" id="ledAmber"></i><i class="led green" id="ledGreen"></i><i class="led red" id="ledRed"></i>
+            <span class="buzz" id="buzz">BUZZER</span>
+          </span>
+        </div>
+        <div class="lcd-msg" id="lcdMsg" aria-live="polite"></div>
+        <div class="lcd-det" id="lcdDet"></div>
+        <div class="lcd-vol"><span>JARRA</span><span id="lcdVol">0,00 / 0,50 L</span></div>
+        <div class="bar" aria-hidden="true"><i id="barFill"></i><b title="95 % del objetivo: el robot se detiene al llegar acá"></b></div>
+      </section>
+
+      <ol class="stages" id="stages" aria-label="Etapas del ciclo"></ol>
+      <p class="note">Si la fruta detectada no es la elegida, la trampilla la manda al tacho de rechazo y el ciclo vuelve a ALIMENTACIÓN. Si el jugo no llega al 95 % del objetivo (marca blanca en la barra), también vuelve a ALIMENTACIÓN. El volumen se calcula por peso, con densidad 1,04 kg/L.</p>
+    </div>
+
+    <aside class="col-side">
+      <section class="card">
+        <div class="btnrow">
+          <button class="btn primary" id="btnStart" type="button">Iniciar</button>
+          <button class="btn" id="btnPause" type="button" disabled>Pausar</button>
+          <button class="btn" id="btnReset" type="button">Reiniciar</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Programación</h2>
+        <fieldset class="field">
+          <legend class="lbl">Fruta a exprimir</legend>
+          <div class="seg-group">
+            <label class="seg"><input type="radio" name="fruta" value="limon"><span><i class="dot" style="background:#b9cc2a"></i>Limón</span></label>
+            <label class="seg"><input type="radio" name="fruta" value="naranja" checked><span><i class="dot" style="background:#ef8a1e"></i>Naranja</span></label>
+            <label class="seg"><input type="radio" name="fruta" value="pomelo"><span><i class="dot" style="background:#e6c84a"></i>Pomelo</span></label>
+          </div>
+        </fieldset>
+        <div class="field">
+          <label for="litros">Volumen de jugo <output id="litrosOut" for="litros">0,50 L</output></label>
+          <input type="range" id="litros" min="0.1" max="2" step="0.05" value="0.5">
+        </div>
+        <div class="field">
+          <label for="vel">Velocidad de simulación</label>
+          <select id="vel">
+            <option value="1">1x (tiempo real)</option>
+            <option value="2">2x</option>
+            <option value="4" selected>4x</option>
+            <option value="8">8x</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Tolva (carga mezclada)</h2>
+        <div class="nums field">
+          <label for="nLimon">Limones<input type="number" id="nLimon" min="0" max="30" value="5"></label>
+          <label for="nNaranja">Naranjas<input type="number" id="nNaranja" min="0" max="30" value="9"></label>
+          <label for="nPomelo">Pomelos<input type="number" id="nPomelo" min="0" max="30" value="4"></label>
+        </div>
+        <button class="btn" id="btnCargar" type="button" style="width:100%">Agregar a la tolva</button>
+      </section>
+
+      <section class="card">
+        <h2>Seguridad</h2>
+        <label class="switch"><input type="checkbox" id="tapa" checked> Tapa cerrada</label>
+        <label class="switch"><input type="checkbox" id="jarra" checked> Jarra colocada</label>
+        <label class="switch"><input type="checkbox" id="sound" checked> Sonido del buzzer</label>
+        <button class="btn" id="btnVaciar" type="button" style="width:100%;margin-top:8px">Vaciar tacho de residuos</button>
+      </section>
+
+      <section class="card">
+        <h2>Contadores</h2>
+        <dl class="stats">
+          <div><dt>En tolva</dt><dd id="stTolva">0</dd></div>
+          <div><dt>Exprimidas</dt><dd id="stExpr">0</dd></div>
+          <div><dt>Rechazadas</dt><dd id="stRech">0</dd></div>
+          <div><dt>Tacho</dt><dd id="stTacho">0/20</dd></div>
+        </dl>
+      </section>
+    </aside>
+  </main>
+
+  <section class="card">
+    <h2>Lecturas de la cámara</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th class="num">N°</th><th>Detectada</th><th class="num">Ø mm</th><th class="num">Peso g</th><th class="num">Confianza</th><th>Decisión</th><th class="num">Jugo mL</th></tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+      <div class="empty" id="logEmpty">Todavía no pasó ninguna fruta. Iniciá el ciclo para ver cada lectura y la decisión del selector.</div>
+    </div>
+    <p class="summary" id="summary"></p>
+  </section>
+</div>
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const svg = $('svg');
+
+/* ---------- Constantes de la máquina ---------- */
+const DENSIDAD = 1.04;          // kg/L, jugo de cítricos (≈ g/mL)
+const CAP_JARRA = 2.2;          // L, capacidad de la jarra
+const CAP_TACHO = 20;           // frutas que entran en el tacho de residuos
+const TOL = 0.95;               // el robot se detiene al llegar al 95 % del objetivo (tolerancia ±5 %)
+const JARRA_Y0 = 402, JARRA_H = 102;
+const X = {gate:80, cam:190, sel:300, cut:420, sq:560, end:684};
+const Y_BELT = 172, Y_CONE = 156, Y_GATE = 118, PRESS_UP = 96, KNIFE_UP = 100;
+
+const FRUTAS = {
+  limon:   {nombre:'Limón',   plural:'limones',  diam:[45,65],  peso:[80,130],  jugo:[30,45],   hue:58, rend:38,  tsq:550, cono:'alta',
+            piel:'#b9cc2a', pulpa:'#eef3a6', zumo:'#e4ee62'},
+  naranja: {nombre:'Naranja', plural:'naranjas', diam:[65,85],  peso:[180,280], jugo:[70,100],  hue:30, rend:85,  tsq:700, cono:'media',
+            piel:'#ef8a1e', pulpa:'#ffbf5e', zumo:'#f7a339'},
+  pomelo:  {nombre:'Pomelo',  plural:'pomelos',  diam:[90,120], peso:[300,450], jugo:[120,180], hue:48, rend:150, tsq:900, cono:'baja, con más fuerza',
+            piel:'#e6c84a', pulpa:'#f4909f', zumo:'#f59aa8'}
+};
+const STAGES = ['REPOSO','PROGRAMACIÓN','VERIFICACIÓN','ALIMENTACIÓN','IDENTIFICACIÓN','SELECCIÓN','CORTE','EXPRIMIDO','DESCARTE','¿VOLUMEN OK?','FINALIZADO'];
+const STATION = {'ALIMENTACIÓN':'lbl-tolva','IDENTIFICACIÓN':'lbl-vision','SELECCIÓN':'lbl-selector','CORTE':'lbl-corte','EXPRIMIDO':'lbl-exprimidor','DESCARTE':'lbl-descarte'};
+
+/* ---------- Cálculos ---------- */
+
+/** Convierte el peso medido por la celda de carga (g) en litros de jugo.
+ *  litros = (g / 1000) / densidad(kg/L) */
+const pesoALitros = g => (g / 1000) / DENSIDAD;
+
+/** Peso que debe marcar la balanza (g) para un volumen programado.
+ *  g = litros * 1000 * densidad(kg/L) */
+const litrosAPeso = l => l * 1000 * DENSIDAD;
+
+/** Estima cuántas frutas faltan para entrar en la zona de parada (95 % del objetivo).
+ *  Divide el faltante en mL por el rendimiento medio de jugo del tipo elegido y redondea hacia arriba. */
+function frutasFaltantes(objL, actL, tipo){
+  const faltaMl = (objL * TOL - actL) * 1000;
+  return faltaMl <= 0 ? 0 : Math.ceil(faltaMl / FRUTAS[tipo].rend);
+}
+
+/** Clasifica la fruta con color (matiz) y diámetro. El pomelo y el limón tienen matiz parecido,
+ *  por eso el diámetro es el que los separa. Devuelve el tipo más cercano y una confianza en %.
+ *  distancia = raíz( ((diám - centro)/10)^2 + ((matiz - matizTipo)/8)^2 ); confianza = 99 - 6*distancia */
+function clasificar(m){
+  let mejor = null;
+  for(const [tipo, d] of Object.entries(FRUTAS)){
+    const centro = (d.diam[0] + d.diam[1]) / 2;
+    const dist = Math.hypot((m.diam - centro) / 10, (m.hue - d.hue) / 8);
+    if(!mejor || dist < mejor.dist) mejor = {tipo, dist};
+  }
+  return {tipo: mejor.tipo, conf: Math.round(clamp(99 - 6 * mejor.dist, 70, 99))};
+}
+
+/* ---------- Utilidades ---------- */
+function rand(a, b){ return a + Math.random() * (b - a); }
+function clamp(v, a, b){ return Math.min(b, Math.max(a, v)); }
+const lerp = (a, b, t) => a + (b - a) * t;
+const ease = t => t < .5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2;
+const easeIn = t => t * t;
+const fmtL = l => l.toFixed(2).replace('.', ',');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function shuffle(a){ for(let i = a.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+const show = (el, on) => { el.style.display = on ? '' : 'none'; };
+const place = (el, x, y, sx = 1, sy = 1) => el.setAttribute('transform', `translate(${x} ${y}) scale(${sx} ${sy})`);
+
+const W = $('fWhole'), H1 = $('half1'), H2 = $('half2'), P = $('press');
+const knife = y => $('knife').setAttribute('transform', `translate(${X.cut} ${y})`);
+const gate = dx => $('gate').setAttribute('transform', `translate(${dx} 0)`);
+const trap = a => $('trap').setAttribute('transform', `rotate(${a} 285 172)`);
+const tray = a => $('tray').setAttribute('transform', `rotate(${a} 664 175)`);
+
+/* ---------- Estado ---------- */
+class Abort extends Error {}
+let token = 0, running = false, userPaused = false, speed = 4, lastHalt = null;
+let hopper = [], peso_g = 0, procesadas = 0, nFruta = 0, binCount = 0;
+let rechazadas = {limon:0, naranja:0, pomelo:0};
+let objetivo = 0.5, elegida = 'naranja';
+let status = {stage:'REPOSO', msg:'', det:'', led:null, blink:false, error:false};
+
+/* ---------- Animación con pausa y velocidad ---------- */
+function anim(ms, fn){
+  const my = token;
+  return new Promise((res, rej) => {
+    let acc = 0, last = null;
+    function frame(now){
+      if(my !== token) return rej(new Abort());
+      if(last === null) last = now;
+      const dt = Math.min(now - last, 100); last = now;
+      refreshHalt();
+      if(!effectiveHalt()) acc += dt * speed;
+      const t = Math.min(1, acc / ms);
+      if(fn) fn(t);
+      if(t >= 1) res(); else requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  });
+}
+const wait = ms => anim(ms);
+
+/* ---------- Seguridad / interbloqueos ---------- */
+function haltReason(){
+  if(!$('tapa').checked) return 'Tapa abierta: cuchilla y cono detenidos';
+  if(!$('jarra').checked) return 'Jarra retirada: colocala para seguir';
+  return null;
+}
+const effectiveHalt = () => haltReason() || (userPaused ? '__pause' : null);
+function refreshHalt(){
+  const r = running ? effectiveHalt() : null;
+  if(r !== lastHalt){
+    lastHalt = r;
+    if(r && r !== '__pause') beep(300, .3);
+    renderLCD();
+  }
+  svg.classList.toggle('running', running && !r);
+}
+
+/* ---------- Pantalla, LEDs y etapas ---------- */
+function setStage(stage, msg, det = '', led = null, blink = false){
+  status = {stage, msg, det, led, blink, error:false};
+  document.querySelectorAll('.st.active').forEach(e => e.classList.remove('active'));
+  if(STATION[stage]) $(STATION[stage]).classList.add('active');
+  renderLCD();
+}
+function setError(msg){
+  status = {...status, msg, det:'', led:'red', blink:false, error:true};
+  renderLCD();
+}
+function renderLCD(){
+  const halted = lastHalt && lastHalt !== '__pause';
+  let label = status.stage, msg = status.msg, det = status.det, led = status.led, blink = status.blink;
+  if(halted){ label = 'ERROR'; msg = lastHalt; det = ''; led = 'red'; blink = false; }
+  else if(lastHalt === '__pause'){ label = status.stage + ' · PAUSA'; led = 'amber'; blink = false; }
+  else if(status.error){ label = 'ERROR'; }
+  $('lcdState').textContent = label;
+  $('lcdMsg').textContent = msg;
+  $('lcdDet').textContent = det;
+  [['blue','Blue'],['amber','Amber'],['green','Green'],['red','Red']].forEach(([c, n]) => {
+    const e = $('led' + n);
+    e.classList.toggle('on', c === led);
+    e.classList.toggle('blink', c === led && blink);
+  });
+  const isErr = halted || status.error;
+  document.querySelectorAll('#stages li').forEach(li => {
+    const cur = li.dataset.s === status.stage;
+    li.classList.toggle('on', cur && !isErr);
+    li.classList.toggle('err', cur && isErr);
+  });
+}
+function renderProgress(){
+  const L = pesoALitros(peso_g);
+  $('lcdVol').textContent = `${fmtL(L)} / ${fmtL(objetivo)} L`;
+  $('barFill').style.width = clamp(L / objetivo * 100, 0, 100) + '%';
+}
+function renderJug(){
+  const L = pesoALitros(peso_g);
+  const h = clamp(L / CAP_JARRA, 0, 1) * JARRA_H;
+  const liq = $('liquid');
+  liq.setAttribute('y', JARRA_Y0 - h);
+  liq.setAttribute('height', h);
+}
+function renderHopper(){
+  const g = $('hopperDots'); g.textContent = '';
+  hopper.slice(0, 12).forEach((f, i) => {
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', 61 + (i % 4) * 13);
+    c.setAttribute('cy', 100 - Math.floor(i / 4) * 13);
+    c.setAttribute('r', 5.2);
+    c.style.fill = FRUTAS[f.tipo].piel; c.style.stroke = 'rgba(0,0,0,.25)';
+    g.appendChild(c);
+  });
+  $('hopperCount').textContent = hopper.length + (hopper.length === 1 ? ' fruta' : ' frutas');
+}
+function renderCounters(){
+  const rech = rechazadas.limon + rechazadas.naranja + rechazadas.pomelo;
+  $('stTolva').textContent = hopper.length;
+  $('stExpr').textContent = procesadas;
+  $('stRech').textContent = rech;
+  $('stTacho').textContent = `${binCount}/${CAP_TACHO}`;
+  $('binTxt').textContent = `${binCount}/${CAP_TACHO}`;
+  $('rejCount').textContent = rech;
+  const h = clamp(binCount / CAP_TACHO, 0, 1) * 66;
+  $('binFill').setAttribute('y', 402 - h); $('binFill').setAttribute('height', h);
+}
+
+/* ---------- Buzzer ---------- */
+let ac = null;
+function flashBuzz(ms){ const b = $('buzz'); b.classList.add('on'); setTimeout(() => b.classList.remove('on'), ms); }
+function beep(freq = 880, dur = .15, delay = 0){
+  setTimeout(() => flashBuzz(dur * 1000), delay * 1000);
+  if(!$('sound').checked) return;
+  try{
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.value = freq; g.gain.value = .05;
+    o.connect(g); g.connect(ac.destination);
+    const t = ac.currentTime + delay;
+    o.start(t); o.stop(t + dur);
+  }catch(e){}
+}
+
+/* ---------- Tolva y fruta ---------- */
+function nuevaFruta(tipo){
+  const d = FRUTAS[tipo];
+  const diam = rand(...d.diam);
+  return {tipo, diam, peso:rand(...d.peso), hue:d.hue + rand(-5, 5), jugoMl:rand(...d.jugo), r:diam * 0.22, n:0};
+}
+const medir = f => ({diam:f.diam + rand(-1.5, 1.5), peso:f.peso + rand(-4, 4), hue:f.hue + rand(-1, 1)});
+function num(id){ const e = $(id); const v = clamp(parseInt(e.value, 10) || 0, 0, 30); e.value = v; return v; }
+function cargar(reemplazar){
+  if(reemplazar) hopper = [];
+  const n = {limon:num('nLimon'), naranja:num('nNaranja'), pomelo:num('nPomelo')};
+  for(const t in n) for(let i = 0; i < n[t]; i++) hopper.push(nuevaFruta(t));
+  shuffle(hopper);
+  if(hopper.length > 60) hopper.length = 60;
+  renderHopper(); renderCounters();
+}
+function buildFruit(f){
+  const D = FRUTAS[f.tipo], r = f.r;
+  const c = $('fwC'); c.setAttribute('r', r); c.setAttribute('cy', -r); c.style.fill = D.piel;
+  const h = $('fwH'); h.setAttribute('cx', -r * .35); h.setAttribute('cy', -r * 1.35); h.setAttribute('rx', r * .3); h.setAttribute('ry', r * .17);
+  [H1, H2].forEach(g => {
+    const dm = g.querySelector('.dome'), sg = g.querySelector('.dseg');
+    dm.setAttribute('d', `M${-r} 0A${r} ${r} 0 0 1 ${r} 0Z`);
+    dm.style.fill = D.pulpa; dm.style.stroke = D.piel; dm.style.opacity = 1;
+    sg.setAttribute('d', `M0 -2V${-r * .8}M${-r * .12} -2L${-r * .6} ${-r * .62}M${r * .12} -2L${r * .6} ${-r * .62}`);
+    sg.style.opacity = .55;
+  });
+}
+
+/* ---------- Registro ---------- */
+function addRow(f, m, res, ok){
+  const D = FRUTAS[res.tipo];
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td class="num">${f.n}</td>` +
+    `<td><i class="dot" style="background:${D.piel};display:inline-block;vertical-align:-1px;margin-right:6px"></i>${D.nombre}</td>` +
+    `<td class="num">${m.diam.toFixed(0)}</td><td class="num">${m.peso.toFixed(0)}</td><td class="num">${res.conf} %</td>` +
+    `<td><span class="badge ${ok ? 'ok' : 'no'}">${ok ? 'Aceptada' : 'Rechazada'}</span></td><td class="num">—</td>`;
+  $('logBody').appendChild(tr);
+  $('logEmpty').hidden = true;
+  const w = document.querySelector('.tablewrap'); w.scrollTop = w.scrollHeight;
+  return tr;
+}
+
+/* ---------- Etapas del ciclo ---------- */
+function agregarJugo(ml){ peso_g += ml * DENSIDAD; renderJug(); renderProgress(); }
+const slide = (x0, x1, ms) => anim(ms, t => place(W, lerp(x0, x1, ease(t)), Y_BELT));
+
+async function waitFor(cond, msgFn){
+  const my = token;
+  if(cond()) return;
+  const prev = status;
+  setError(msgFn()); beep(300, .3);
+  while(!cond()){
+    await sleep(150);
+    if(my !== token) throw new Abort();
+    const m = msgFn();
+    if(m !== status.msg) setError(m);
+  }
+  status = prev; renderLCD();
+}
+
+async function alimentar(f){
+  setStage('ALIMENTACIÓN', 'La compuerta dosificadora deja pasar una fruta', 'Tolva → cinta', 'green', true);
+  buildFruit(f); show(H1, false); show(H2, false);
+  place(W, X.gate, Y_GATE); show(W, true);
+  await anim(280, t => gate(50 * ease(t)));
+  await anim(450, t => place(W, X.gate, lerp(Y_GATE, Y_BELT, easeIn(t))));
+  await Promise.all([slide(X.gate, X.cam, 700), anim(300, t => gate(50 * (1 - ease(t))))]);
+}
+
+async function identificar(f, m){
+  setStage('IDENTIFICACIÓN', 'La cámara mide color, diámetro y peso', '', 'amber', false);
+  const beam = $('beam'), scan = $('scan');
+  await anim(900, t => {
+    const y = Y_BELT - f.r * 2 * (.5 + .5 * Math.sin(t * Math.PI * 3));
+    scan.setAttribute('y1', y); scan.setAttribute('y2', y);
+    scan.setAttribute('opacity', .9); beam.setAttribute('opacity', .18);
+  });
+  const res = clasificar(m);
+  const det = `Ø ${m.diam.toFixed(0)} mm · ${m.peso.toFixed(0)} g · matiz ${m.hue.toFixed(0)}°`;
+  setStage('IDENTIFICACIÓN', `Detectado: ${FRUTAS[res.tipo].nombre.toUpperCase()} (${res.conf} %)`, det, 'amber', false);
+  await wait(450);
+  scan.setAttribute('opacity', 0); beam.setAttribute('opacity', 0);
+  return {res, det};
+}
+
+async function seleccionar(res, ok, det){
+  const F = FRUTAS[elegida], D = FRUTAS[res.tipo];
+  const msg = ok ? `Es ${D.nombre.toLowerCase()}: coincide con la fruta elegida`
+                 : `Es ${D.nombre.toLowerCase()}, no ${F.nombre.toLowerCase()}: se descarta para no mezclar`;
+  setStage('SELECCIÓN', msg, det, 'amber', false);
+  await slide(X.cam, X.sel, 600);
+  await wait(300);
+  if(ok) return;
+  await anim(300, t => trap(75 * ease(t)));
+  await anim(550, t => place(W, X.sel, lerp(Y_BELT, 398, easeIn(t))));
+  show(W, false);
+  rechazadas[res.tipo]++; renderCounters();
+  await anim(250, t => trap(75 * (1 - ease(t))));
+}
+
+async function cortar(f){
+  const r = f.r;
+  setStage('CORTE', 'La fruta avanza hasta la cuchilla', '', 'green', true);
+  await slide(X.sel, X.cut, 700);
+  setStage('CORTE', 'La cuchilla baja y parte la fruta al medio', '', 'green', true);
+  let cortada = false;
+  await anim(700, t => {
+    const y = lerp(KNIFE_UP, Y_BELT, easeIn(t));
+    knife(y);
+    if(!cortada && y >= Y_BELT - r){
+      cortada = true; show(W, false);
+      place(H1, X.cut - (r + 3), Y_BELT); place(H2, X.cut + (r + 3), Y_BELT);
+      show(H1, true); show(H2, true);
+    }
+  });
+  await anim(450, t => knife(lerp(Y_BELT, KNIFE_UP, ease(t))));
+}
+
+async function exprimirMitad(h, f, idx){
+  const r = f.r, D = FRUTAS[f.tipo], mitad = f.jugoMl / 2;
+  setStage('EXPRIMIDO', `Exprimiendo mitad ${idx} de 2`, `Cono a velocidad ${D.cono}`, 'green', true);
+  await anim(350, t => place(P, X.sq, lerp(PRESS_UP, Y_CONE - r, ease(t))));
+  $('drip').classList.add('on');
+  let prev = 0;
+  await anim(D.tsq, t => {
+    const e = ease(t), sy = 1 - .55 * e;
+    place(h, X.sq, Y_CONE, 1, sy);
+    place(P, X.sq, Y_CONE - r * sy);
+    agregarJugo(mitad * (e - prev)); prev = e;
+  });
+  const dm = h.querySelector('.dome'); dm.style.fill = D.piel; dm.style.opacity = .9;
+  h.querySelector('.dseg').style.opacity = 0;
+  await anim(350, t => place(P, X.sq, lerp(Y_CONE - r * .45, PRESS_UP, ease(t))));
+  $('drip').classList.remove('on');
+}
+
+async function descartarMitad(h){
+  setStage('DESCARTE', 'Cáscara y pulpa van al tacho de residuos', '', 'green', false);
+  await anim(550, t => place(h, lerp(X.sq, X.end, ease(t)), lerp(Y_CONE, Y_BELT, ease(t)), 1, .45));
+  await anim(300, t => tray(32 * ease(t)));
+  await anim(520, t => place(h, X.end + 8 * t, lerp(Y_BELT, 398, easeIn(t)), 1, .45));
+  show(h, false);
+  await anim(250, t => tray(32 * (1 - ease(t))));
+}
+
+async function exprimirYDescartar(f){
+  const r = f.r, espera = X.sq - (2 * r + 12);
+  setStage('EXPRIMIDO', 'Las mitades avanzan hacia el cono exprimidor', '', 'green', true);
+  await Promise.all([
+    anim(800, t => place(H2, lerp(X.cut + (r + 3), X.sq, ease(t)), lerp(Y_BELT, Y_CONE, ease(t)))),
+    anim(800, t => place(H1, lerp(X.cut - (r + 3), espera, ease(t)), Y_BELT))
+  ]);
+  await exprimirMitad(H2, f, 1);
+  await descartarMitad(H2);
+  setStage('EXPRIMIDO', 'La segunda mitad pasa al cono', '', 'green', true);
+  await anim(500, t => place(H1, lerp(espera, X.sq, ease(t)), lerp(Y_BELT, Y_CONE, ease(t))));
+  await exprimirMitad(H1, f, 2);
+  await descartarMitad(H1);
+}
+
+function finalizar(){
+  const F = FRUTAS[elegida], L = pesoALitros(peso_g), desv = (L / objetivo - 1) * 100;
+  const rech = rechazadas.limon + rechazadas.naranja + rechazadas.pomelo;
+  const dTxt = (desv >= 0 ? '+' : '') + desv.toFixed(1).replace('.', ',') + ' %';
+  setStage('FINALIZADO', `¡Listo! ${fmtL(L)} L de jugo de ${F.plural}`,
+    `Objetivo ${fmtL(objetivo)} L · desvío ${dTxt} · ${procesadas} exprimidas · ${rech} rechazadas`, 'green', false);
+  beep(880, .15, 0); beep(880, .15, .3); beep(880, .15, .6);
+  $('summary').textContent = `${procesadas} frutas exprimidas y ${rech} rechazadas por no coincidir. ` +
+    (Math.abs(desv) <= 5 ? 'El volumen quedó dentro de la tolerancia de ±5 %.' : 'La última fruta aportó más jugo del necesario y el volumen quedó fuera de la tolerancia de ±5 %.');
+  running = false; refreshHalt(); setRunningUI(false);
+}
+
+async function run(){
+  const my = token, F = FRUTAS[elegida];
+  running = true; setRunningUI(true); refreshHalt();
+  try{
+    setStage('PROGRAMACIÓN', `Objetivo: ${fmtL(objetivo)} L de jugo de ${F.plural}`, `Peso objetivo en balanza: ${Math.round(litrosAPeso(objetivo))} g`, 'blue', false);
+    await wait(900);
+    setStage('VERIFICACIÓN', 'Revisando tapa, jarra y tacho de residuos', '', 'blue', false);
+    await wait(800);
+    const libre = () => !haltReason() && binCount < CAP_TACHO;
+    const motivo = () => haltReason() || 'Tacho de residuos lleno: vaciarlo para seguir';
+    await waitFor(libre, motivo);
+
+    while(pesoALitros(peso_g) < objetivo * TOL){
+      await waitFor(() => hopper.some(f => f.tipo === elegida), () => `No quedan ${F.plural} en la tolva: agregá más fruta`);
+      await waitFor(libre, motivo);
+      const f = hopper.shift(); f.n = ++nFruta;
+      renderHopper(); renderCounters();
+      await alimentar(f);
+      const m = medir(f);
+      const {res, det} = await identificar(f, m);
+      const ok = res.tipo === elegida;
+      f.row = addRow(f, m, res, ok);
+      await seleccionar(res, ok, det);
+      if(!ok) continue;                       // vuelve a ALIMENTACIÓN sin cortar
+      await cortar(f);
+      await exprimirYDescartar(f);
+      procesadas++; binCount++;
+      f.row.lastElementChild.textContent = Math.round(f.jugoMl);
+      renderCounters();
+      const L = pesoALitros(peso_g);
+      const alcanzado = L >= objetivo * TOL;
+      setStage('¿VOLUMEN OK?',
+        alcanzado ? `Acumulado ${fmtL(L)} L: objetivo alcanzado`
+                  : `Acumulado ${fmtL(L)} L de ${fmtL(objetivo)} L: faltan ~${frutasFaltantes(objetivo, L, elegida)} fruta(s)`,
+        '', 'green', false);
+      await wait(450);
+    }
+    if(my === token) finalizar();
+  }catch(e){
+    if(!(e instanceof Abort)) throw e;
+  }
+}
+
+/* ---------- Mando ---------- */
+function setRunningUI(on){
+  $('btnStart').disabled = on;
+  $('btnPause').disabled = !on;
+  $('btnPause').textContent = 'Pausar';
+  document.querySelectorAll('input[name=fruta]').forEach(r => r.disabled = on);
+  $('litros').disabled = on;
+}
+function resetVisual(){
+  [W, H1, H2].forEach(e => show(e, false));
+  knife(KNIFE_UP); place(P, X.sq, PRESS_UP); gate(0); trap(0); tray(0);
+  $('beam').setAttribute('opacity', 0); $('scan').setAttribute('opacity', 0);
+  $('drip').classList.remove('on');
+  document.querySelectorAll('.st.active').forEach(e => e.classList.remove('active'));
+}
+function applyProgram(){
+  objetivo = parseFloat($('litros').value);
+  elegida = document.querySelector('input[name=fruta]:checked').value;
+  $('litrosOut').textContent = fmtL(objetivo) + ' L';
+  if(peso_g === 0) svg.style.setProperty('--jugo', FRUTAS[elegida].zumo);
+  const y = JARRA_Y0 - objetivo / CAP_JARRA * JARRA_H;
+  $('goalLine').setAttribute('y1', y); $('goalLine').setAttribute('y2', y);
+  $('goalTxt').setAttribute('y', y + 4); $('goalTxt').textContent = fmtL(objetivo) + ' L';
+  renderProgress();
+  if(!running){
+    status = {stage:'REPOSO', msg:`Objetivo: ${fmtL(objetivo)} L de jugo de ${FRUTAS[elegida].plural}. Presioná Iniciar.`,
+              det:`Peso objetivo en balanza: ${Math.round(litrosAPeso(objetivo))} g`, led:null, blink:false, error:false};
+    renderLCD();
+  }
+}
+function limpiarLote(){
+  peso_g = 0; procesadas = 0; nFruta = 0; rechazadas = {limon:0, naranja:0, pomelo:0};
+  $('logBody').textContent = ''; $('logEmpty').hidden = false; $('summary').textContent = '';
+  resetVisual(); renderJug();
+}
+function startRun(){
+  if(running) return;
+  token++; userPaused = false; lastHalt = null;
+  limpiarLote(); applyProgram(); renderCounters();
+  run();
+}
+function reset(){
+  token++; running = false; userPaused = false; lastHalt = null; binCount = 0;
+  limpiarLote(); cargar(true); setRunningUI(false); applyProgram(); renderCounters();
+  svg.classList.remove('running');
+}
+
+$('btnStart').addEventListener('click', startRun);
+$('btnReset').addEventListener('click', reset);
+$('btnPause').addEventListener('click', () => {
+  if(!running) return;
+  userPaused = !userPaused;
+  $('btnPause').textContent = userPaused ? 'Continuar' : 'Pausar';
+  refreshHalt();
+});
+$('btnCargar').addEventListener('click', () => cargar(false));
+$('btnVaciar').addEventListener('click', () => { binCount = 0; renderCounters(); });
+$('litros').addEventListener('input', applyProgram);
+document.querySelectorAll('input[name=fruta]').forEach(r => r.addEventListener('change', applyProgram));
+$('vel').addEventListener('change', () => { speed = parseFloat($('vel').value); });
+$('tapa').addEventListener('change', refreshHalt);
+$('jarra').addEventListener('change', refreshHalt);
+['nLimon', 'nNaranja', 'nPomelo'].forEach(id => $(id).addEventListener('change', () => num(id)));
+
+/* ---------- Inicio ---------- */
+(function init(){
+  const ol = $('stages');
+  STAGES.forEach(s => { const li = document.createElement('li'); li.dataset.s = s; li.textContent = s; ol.appendChild(li); });
+  const tk = $('ticks');
+  [0.5, 1, 1.5, 2].forEach(L => {
+    const y = JARRA_Y0 - L / CAP_JARRA * JARRA_H;
+    const ln = document.createElementNS(NS, 'line');
+    ln.setAttribute('x1', 513); ln.setAttribute('x2', 520); ln.setAttribute('y1', y); ln.setAttribute('y2', y);
+    ln.setAttribute('stroke', 'var(--steel-d)'); ln.setAttribute('stroke-width', 1.5);
+    const tx = document.createElementNS(NS, 'text');
+    tx.setAttribute('class', 'tick'); tx.setAttribute('x', 509); tx.setAttribute('y', y + 3.5);
+    tx.textContent = fmtL(L).replace(/,?0+$/, '').replace(/^(\d)$/, '$1');
+    tk.appendChild(ln); tk.appendChild(tx);
+  });
+  reset();
+})();
+})();
+</script>
+
+</body></html>
